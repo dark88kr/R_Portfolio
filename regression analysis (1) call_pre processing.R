@@ -43,12 +43,17 @@ call_sel %>% filter(`Serial Number` == "2167")
 #가장 최신 데이터 이외에 데이터는 삭제 되고 
 #count 함수로 해당 기간 몇번의 전화 이력이 있는지 확인
 
-#call_sel 데이터를 사용 예정
+#필요컬럼 재선정, chr -> fct 로 변경
+call_tran <- 
+  call_sel %>% 
+  select(`Serial Number`, `Task Closed Date`, count) %>% 
+  mutate_if(is.character, as.factor)
+
+call_tran$`Task Closed Date` <- as.numeric(call_tran$`Task Closed Date`)
+
+call_tran <- as.data.frame(call_tran)
 
 
+#call_tran 데이터를 사용 예정
 
-
-
-
-call_sel %>% filter(`Serial Number` == "2167")
 
