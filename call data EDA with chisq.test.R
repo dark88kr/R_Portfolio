@@ -27,9 +27,6 @@ skimr::skim(call_cols)
 
 glimpse(call_cols)
 #분포 확인
-plot1 <- ggplot(call_cols, aes(x = `source code`)) +
-  geom_bar() +
-  labs(title = "Distribution of source_code")
 
 plot2 <- ggplot(call_cols, aes(x = user)) +
   geom_bar() +
@@ -43,18 +40,9 @@ plot4 <- ggplot(call_cols, aes(x = `task type`)) +
   geom_bar() +
   labs(title = "Distribution of task_type")
 
-# 4분할된 화면에 시각화 나타내기
-grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
-
 plot5 <- ggplot(call_cols, aes(x = outcome)) +
   geom_bar() +
   labs(title = "Distribution of outcome")
-
-plot6 <- ggplot(call_cols, aes(x = `pledge status`)) +
-  geom_bar() +
-  labs(title = "Distribution of pledge_status")
-
-grid.arrange(plot5,plot6)
 
 #취소 전화와 관련된 데이터 시각화
 grid.arrange(plot2,plot3,plot4,plot5, ncol = 2)
@@ -119,19 +107,18 @@ call_cols <-
 colnames(call_cols)[9] <- "user"
 
 #인바운드만 있는 새로운 데이터 프레임 생성
+#목표변수 이진분류 컬럼으로 변경(cacelled 를 제외한 나머지는 방어)
+
 call_in <- 
   call_cols %>% 
-  filter(`task group` == "Inbound")
+  filter(`task group` == "Inbound") %>% 
+  mutate(outcome = ifelse(outcome == "Cancelled", "cancelled", "defense"))
 
 call_in %>% 
   group_by(outcome) %>% 
   summarise(n = n()) %>% 
   arrange(desc(n))
 
-#아웃컴에서 cacelled 를 제외한 나머지는 방어로 보고 이진카테고리 형성
-call_in <- 
-  call_in %>% 
-  mutate(outcome = ifelse(outcome == "Cancelled", "cancelled", "defense"))
   
 #유저중 전화와 관련 없는 사람제거 하기
 
