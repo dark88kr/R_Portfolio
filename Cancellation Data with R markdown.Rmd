@@ -1,0 +1,204 @@
+---
+title: "Cancellation Data EDA"
+author: "yonggi.yeom"
+date: "`r Sys.Date()`"
+output: html_document
+---
+## 수익률 증가 프로젝트 1
+*** 
+> ### 결론
+
+아래 EDA에서 확인한 결과부터 서술한다
+
+1. 인바운드를 통해 후원 취소 처리되는 경우는 40%에 달한다
+
+2. 후원자 관리 센터를 거치지 않는 후원취소도 24.5%에 달하는 만큰
+해당 후원자들과 컨택이 필요하다
+
+3. 기간지정 후원자들이 그렇지 않은 후원자보다 총후원금이 높다
+  
+    + 기간지정 후원자의 기간을 늘릴 수 있을까?
+  
+    + 취소시 총 후원금이 낮은 후원자들에게는 기간지정을 유도하는 방법은?
+
+4. 취소가 가장 많이 발생하는 2시 30분경에는 인바운드 피하기
+
+##### 자세한 내용은 아래 본문 참고
+
+
+### 수익률 인수분해
+현재 개선이 가능한 부분을 찾기 위해 데이터가 아닌 사업모델을 확인하였고
+내부 회의를 통해서 제어가 가능한 부분인 
+기존 후원자의 이탈에 대해서 확인 하기로 결정
+
+###### 자세한 결정 과정에 대해서는 공개 불가
+
+이탈 후원자의 현황을 보여주는 데이터부터 확인
+
+#### 취소 데이터 불러오기
+
+###### 필요 패키지 불러오기
+```{r library, message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(ggplot2)
+library(gridExtra)
+library(stringr)
+library(tidyr)
+library(yaml)
+```
+###### 개인정보 제외한 데이터부터 공개
+```{r message=FALSE, warning=FALSE, include=FALSE}
+can <- readxl::read_excel("cancell.xlsx")
+colnames(can) <- tolower(colnames(can))
+can_sel <- 
+  can %>% 
+  select(sourcecode, canceldate,cancelcode,cancelreasondescription,
+         serialno,bank,frequency,donationamount,dob,
+         gender,firstdeduction,totalcollected)
+```
+```{r}
+glimpse(can_sel)
+```
+취소 후원자에 대한 기본 정보를 담고 있는 데이터이며
+취소 데이터와 관련이 있는 후원자 관리 센터의 기록을 더하여 확인 예정이다
+
+모든 내부 데이터에는 약정 별 키 값인 **시리얼번호** 가 존재한다
+해당 키값을 사용해 데이터 병합을 위해서는 
+데이터 테이블 마다 컬럼명을 동일하게 맞춰 준다
+
+###### 개인정보 제외한 데이터부터 공개
+```{r message=FALSE, warning=FALSE, include=FALSE}
+call <- read_excel("call.xlsx")
+colnames(call) <- tolower(colnames(call))
+```
+
+```{r}
+colnames(call)[2] <- "serialno" #키 컬럼 변경
+
+call_sel <-
+  call %>% 
+  select(serialno, user, `task group` ,`task closed date`)
+
+call_sel <- 
+  call_sel %>% 
+  arrange(desc(`task closed date`)) %>%
+  distinct(serialno, .keep_all = TRUE)   #데이터 전처리
+
+#시리얼번호별 최신 데이터만 남기기
+
+```
+
+후원자 관리센터 데이터에서는 전화 및 인입이력을 시간순으로 저장하고 있어
+키값으로 사용하는 **시리얼번호** 별로 여러개의 데이터가 존재할 수 있기 때문에 가장 최신의 데이터남겨 취소 데이터와 병합할 예정이다
+현재는 취소 데이터를 중점으로 보기 때문에 
+후원자 관리센터의 데이터는 보조 역활을 하기 때문이다.
+
+Task 종료 시점을 나타내는 컬럼에서 
+날짜, 시간 정보를 추출
+
+```{r}
+call_sel <- 
+  call_sel %>% 
+  mutate(date = as.Date(`task closed date`),
+         time =  format(strptime(`task closed date`, format="%Y-%m-%d %H:%M:%S"), "%H:%M:%S")) %>% 
+  select(- `task closed date`)
+
+call_sel$time <- hms(call_sel$time)
+```
+
+
+
+
+```{r}
+glimpse(call_sel)
+```
+
+불러온 두개의 데이터를 병합하여 EDA 실시
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+can_call <- 
+  can_sel %>% 
+  left_join(call_sel, by = "serialno")
+
+```
+
+*** 
+> Data EDA
+
+```{r message=FALSE, warning=FALSE}
+glimpse(can_call)
+```
+
+
+Task별로 입력된 취소 후원자 숫자와 평균 시간대를 확인
+```{r}
+can_call %>% 
+  mutate(hour = hour(time),
+         minu = minute(time)) %>% 
+  group_by(`task group`) %>% 
+  summarise(count = n(),
+            avg_h = median(hour),
+            avg_m = median(minu)) %>% 
+    data.frame %>% 
+  mutate(sum = sum(count),
+         perc = round((count / sum)*100,2)) %>%
+  select(task.group, count, perc,avg_h,avg_m) %>% 
+  arrange(desc(count)) 
+```
+인바운드로 들어와 처리되는 후원취소건수는 전체의 40%에 달하며 
+후원자 관리센터를 거치지 않고 처리되는 "WebAccess"도 24.5%를 차지하고 있어
+해당 취소를 후원자 관리 센터에서 다룰 필요가 있을 것이다.
+
+후원 권유의 성격을 지니고 있는 전화에서도 취소가 발생하고 있어 
+실제 발생했던 전화 기록과 스크립트를 대조하여 어떤 문구 즈음에 취소가 발생되었는지도 확인할 필요가 있을 것이다.
+
+인바운드로 인입되는 취소후원자 데이터를 통해 
+개발사 별로 총 후원금 확인
+```{r}
+can_call %>% 
+  filter(`task group` == "Inbound") %>% 
+  group_by(sourcecode) %>%
+  summarise(median = median(totalcollected))
+```
+
+평균 총 후원금이 높은 두개의 개발사를 중점으로 확인
+
+```{r}
+can_call %>%
+  filter(sourcecode == "Homepage" | sourcecode == "LLF") %>% 
+  group_by(cancelreasondescription) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n))
+```
+
+두 개발사의 취소 사유에서 보여주는 것처럼, 
+개발 당시 부터 기간을 지정하여 인입되어을 가능성이 높다
+하지만 다른 개발사 보다 총후원금이 높아서
+기간 지정을 유도하여 전체 개발사의 총 후원금을 높이는 전략도 
+생각해 볼수 있을 것이다.
+
+```{r}
+can_call %>% 
+  filter(cancelreasondescription == "Financial constraints" | 
+           cancelreasondescription == "Donor refuse to provide reason") %>%
+  mutate(hour = hour(time),
+         minu = minute(time)) %>% 
+  summarise(mean = mean(donationamount),
+            avg_h = median(hour),
+            avg_m = median(minu))
+```
+
+또한 취소 사유중 가장 많은 비중을 차지하는 사유거절과 경제적 사유로 후원취소를 요청하는 후원자는 
+2시30분경에 15,000원 정도를 후원하는 후원자라는 단순 통계를 통해
+
+해당 시간대에 인바운드 대신 취소가 많이 발생하지 않는 정보수정 전화를 진행하는 것도 하나의 방법이 될수 있을 것이다.
+
+
+
+
+
+
+
+
