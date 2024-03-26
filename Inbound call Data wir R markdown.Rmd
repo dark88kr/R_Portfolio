@@ -1,0 +1,220 @@
+---
+title: "Inblund call Data EDA"
+author: "yonggi.yeom"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 수익률 증가 프로젝트 1-1.
+
+*** 
+> ### 결론
+ 
+카이제곱검증으로 **신뢰수준 95%**에서 
+**숙련사용자**와 **비숙련사용자**의 **취소방어율** 차이가 존재합니다.
+
+숙련사용자의 노하우를 비숙련 사용자에게 전수 또는 공유하므로서
+전체 취소 방어율 상승에 기여할 수 있을것으로 예상합니다.
+
+
+### Inbound call 기록 확인
+앞서 진행한 취소 후원자 EDA를 통해 취소의 40% 이상이 선 인입되는 전화로  발생하고 있다.
+
+#### 후원자 관리센터 데이터 불러오기
+###### 필요 패키지 불러오기
+```{r library, message=FALSE, warning=FALSE, include=FALSE}
+library(dplyr)
+library(readxl)
+library(lubridate)
+library(ggplot2)
+library(gridExtra)
+library(stringr)
+library(tidyr)
+library(yaml)
+```
+###### 개인정보 제외한 데이터부터 공개
+```{r message=FALSE, warning=FALSE, include=FALSE}
+call <- read_excel("call.xlsx")
+colnames(call) <- tolower(colnames(call))
+colnames(call)[2] <- "serialno"
+
+
+call_cols <- 
+  call %>% 
+  select(serialno, `source code`, user, `task group`, `task closed date`, `task type`, 
+         outcome, `pledge status`, `donation amount`)
+```
+
+
+```{r}
+glimpse(call_cols)
+skimr::skim(call_cols)
+```
+
+해당 파일은 결측치가 없지만, chr 특성이 컬럼이 대다수를 차지하기 때문에
+분석 방법을 숫자 컬럼과 다르게 사용해야 한다.
+
+평균이나 표준편차 등으로 데이터 확인하기 어렵게 때문에 분포부터 확인 한다
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot2 <- ggplot(call_cols, aes(x = user)) +
+  geom_bar() +
+  labs(title = "Distribution of user")
+
+plot3 <- ggplot(call_cols, aes(x = `task group`)) +
+  geom_bar() +
+  labs(title = "Distribution of task_group")
+
+plot4 <- ggplot(call_cols, aes(x = `task type`)) +
+  geom_bar() +
+  labs(title = "Distribution of task_type")
+plot5 <- ggplot(call_cols, aes(x = outcome)) +
+  geom_bar() +
+  labs(title = "Distribution of outcome")
+
+grid.arrange(plot3,plot2,plot5,plot4, ncol = 2)
+
+```
+
+사용자 마다 전화 수신량의 차이가 있고 인바운드의 기록이 전체 기록 중 대부분을 차지 하고 있음을 알수 있다.
+
+또한 전화의 마무리의 대다수가 후원취소로 확인된다
+
+```{r}
+call_cols %>% 
+  filter(outcome == "Cancelled") %>% 
+  group_by(`task group`) %>% 
+  summarise(n = n()) %>% 
+  data.frame %>% 
+  mutate(perc = (n / sum(n))*100) %>% 
+  arrange(desc(n))
+```
+
+인바운드 외에도 다른 경로로 취소가 발생하고 있지만 
+인바운드와 후원자 관리센터를 거치지 않는 취소가 
+전체의 80%를 차지하고있다
+
+앞선 데이터 분석에서도 확인한 내용 처럼, 후원자 관리 센터를 거치지 않고 후원취소가 이루어지는 후원자들에 대한 관리가 필요하다는 사실을 두가지 데이터로 확인 하였다
+
+조금더 자세한 분석을 위해 센터를 거치지 않는 task 제외한 데이터 확인
+```{r}
+call_cols %>% 
+  filter(outcome == "Cancelled") %>% 
+  filter(`task group` != "WebAccess") %>% 
+  group_by(`task group`) %>% 
+  summarise(n = n()) %>% 
+  data.frame %>% 
+  mutate(perc = (n / sum(n))*100) %>% 
+  arrange(desc(n))
+```
+
+인바운드에 포함된 예약전화(outbound)까지 포함하면 77% 이상이
+인바운드를 통해 취소가 이루어 지고 있다
+
+
+가장 많은 데이터를 차지하는 인바운드 데이터와 그 전화의 결과만 살펴본다
+```{r}
+call_cols %>% 
+  filter(`task group` == "Inbound") %>% 
+  group_by(outcome) %>% 
+  summarise(n = n()) %>% 
+  data.frame %>% 
+  mutate(perc = n / sum(n),
+         per = scales::percent(perc)) %>% 
+  select(-perc) %>% 
+  arrange(desc(n))
+```
+
+예상대로 전화의 53% 정도는 취소로 종료되지만 해지방어로 적지 않은 비율로 발샹하고 있을을 확인 할수 있다.
+
+*** 
+> ### 가설설정 및 검증
+
+사용자별 전화 수신량을 차이가 
+인바운드 전화의 결과를 다르게 가져가지는 않는지 
+즉 사용자별 취소 방어율과 취소률이 통계적으로 
+유의미한 수준으로 다른지 확인
+
+#### **숙련 사용자는 비숙련 사용자의 전화결과에 차이를 보일것이다.**
+
+가설검증 이전에 사용자 이름을 보기 좋게 정렬하고
+전화 기록은 취소의 대분을 차지하는 인바운드 기록만 사용하고
+취소 이외의 결과 값은 defense 로 수정하여
+이진 분류 컬럼으로 생성한다.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+call_cols <- 
+  call_cols %>% 
+  mutate(username = str_extract(user, "^[^.]+")) %>% 
+  select(-user)
+colnames(call_cols)[9] <- "user"
+
+call_in <- 
+  call_cols %>% 
+  filter(`task group` == "Inbound") %>% 
+  mutate(outcome = ifelse(outcome == "Cancelled", "cancelled", "defense"))
+```
+
+
+```{r}
+call_in <- 
+  call_in %>% 
+  filter(user != "yonggi") %>% 
+  filter(user != "heeweon") # 실제 전화를 받지 않는 사용자 제외
+
+call_in <- 
+  call_in %>% 
+  mutate_if(is.character, as.factor) #분석을 위해 특성 변경
+
+call_in$serialno <- as.character(call_in$serialno) #분석에 필요없는 ID값
+
+glimpse(call_in)
+skimr::skim(call_in)
+```
+
+검증을 위해 사용자를 숙련과 비숙련 그룹으로 나눔
+```{r}
+call_in<- 
+  call_in %>% 
+  mutate(expert = ifelse(user == "myunghoon" | user == "sangok" 
+                         |user == "jihye" | user == "wonhee","exp","nobi"))
+
+call_table <- xtabs(~expert + outcome, data = call_in)
+
+prop.table(call_table, margin = 1) *100
+
+ggplot(call_in , aes(x = outcome, fill = expert)) + geom_bar()
+```
+
+인바운드 처리결과를 숙련, 비숙련으로 나눈 결과로
+숙련은 취소방어가 비숙련에 비해 9% 정도 높은 것으로 확인 되었다
+
+해당 표가 통계적으로 의미가 있는지 카이제곱 검정으로 진행한다
+
+```{r}
+call_table %>% 
+  chisq.test() %>% 
+  broom::tidy()
+
+```
+
+가설 설정 
+H0 : 두 그릅의 차이는 없다.
+H1 : 두 그룹의 차이는 존재 한다.
+
+P값이 0.02로 유의수준 0.05보다 낮기 때문에 
+귀무가설 H0를 기각하고 대립 가설 H1을 채택 할수 있다
+
+
+즉 숙련사용자들의 취소방어가 높기 때문에
+해당 숙련 사용자들의 취소 방어 전화 중 교육 자료로 생성하여
+비숙련 사용자에게 공유하는 방식으로하여
+취소 방어률을 놀일수 있을 것입니다.
+
+
+
+
+
+
+
+
