@@ -1,0 +1,143 @@
+---
+title: "Stock Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(googlesheets4)
+library(tidyverse)
+library(reshape2)
+library(quantmod)
+library(Quandl)
+library(tidyquant)
+library(gt)
+library(shiny)
+library(shiny)
+library(knitr)
+```
+
+
+```{r include= FALSE}
+A <- read_sheet("https://docs.google.com/spreadsheets/d/18Jxe4ZWItKe6HRHlT9xDUl3cvNKKxm-CCor-NeeCERA/edit#gid=1741244585")
+#구글스프레트 시트에서 Finance 데이터 불러오기
+
+#회사 이름을 Ticker로 저장
+ticker <- colnames(A)[9]
+
+#필요한 컬럼의 범위만 선택
+financial <-
+  A %>%
+  select(1:6)
+glimpse(financial)
+
+#행의 명을 변경
+financial[16,1] <- c("Date")
+
+
+#필요값 추출 및 속성전처리
+
+rim <- financial[c(16,15,68,74,75),]
+
+rim[,2] <- unlist(rim[,2])
+rim[,3] <- unlist(rim[,3])
+rim[,4] <- unlist(rim[,4])
+rim[,5] <- unlist(rim[,5])
+rim[,6] <- unlist(rim[,6])
+
+rim <- as.data.frame(rim)
+
+rim <- t(rim)
+colnames(rim) <- rim[1, ]
+
+rim <- rim[-1,]
+rim <- as.data.frame(rim)
+
+rim <- 
+  rim %>% 
+  mutate(`Net Income (GAAP)` = as.numeric(`Net Income (GAAP)`),
+         `Net Cash From Operating Activities` = as.numeric(`Net Cash From Operating Activities`),
+         ROE = as.numeric(ROE),
+         RIM = as.numeric(RIM))
+
+
+#주가의 6년치 정보
+
+stock <- tq_get(ticker, from = "2019-01-01", to = "2024-04-11")
+stock_xts <- xts(stock[, c("adjusted", "volume")], order.by = stock$date)
+
+
+#현재 주식의 상태
+ratio <- yahooQF(c("Previous Close","Market Capitalization","Dividend/Share","Price/Book"))
+
+f_ratio <- getQuote(ticker,what = ratio)
+
+
+#현재 주가와 RIM 계산값
+current <- stock %>% arrange(desc(date)) %>% head(10)
+co <- cbind(current,rim$RIM)
+co$`rim$RIM` <- rim[1,5]
+colnames(co)[9] <- c("RIM")
+
+
+```
+
+
+Column {data-width=400, .no-padding}
+-----------------------------------------------------------------------
+
+### Ticker `r ticker` Current info.
+
+```{r, fig.width=18, fig.height=5}
+
+renderTable({f_ratio %>% gt()})
+
+```
+
+
+### Ticket `r ticker` Price chart
+
+```{r, fig.width=18,fig.height=10}
+chart_Series(stock_xts[, "adjusted"], TA = NULL)
+
+```
+
+
+### Ticker  `r ticker` Volumn Chart
+
+```{r, fig.width=18, fig.height=5}
+chart_Series(stock_xts[, "volume"], TA = NULL, name = "Volume")
+```
+
+
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+
+### TTicker `r ticker` Current Price Vs RIM
+
+```{r,fig.width=18,fig.height=10}
+ggplot(co, aes(x = date)) +
+  geom_line(aes(y = adjusted, color = "Adjusted"), size = 1) +
+  geom_area(aes(y = RIM, fill = "RIM"), alpha = 0.3) + # RIM을 영역 그래프로 추가
+  geom_text(aes(y = adjusted, label = round(adjusted)), vjust = -0.5, hjust = -0.5, size = 3, color = "steelblue") + # 글자 크기 조정
+  geom_text(aes(y = RIM, label = round(RIM)), vjust = 1, hjust = -0.5, size = 3, color = "red") + # 글자 크기 조정
+  labs(y = "Value", title = "Adjusted and RIM over Time", color = "Legend", fill = "Legend") +
+  scale_color_manual(values = "steelblue", name = "") + # 범례 이름을 제거하려면 name을 공백으로 설정합니다.
+  scale_fill_manual(values = "red", name = "") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+```
+
+
+### Ticker `r ticker` Finance info.
+
+```{r}
+renderTable({rim %>% select(-RIM)%>% gt()})
+```
+
