@@ -1,0 +1,250 @@
+---
+title: "Interpretation of prediction model"
+author: "yonggi.yeom"
+output: html_document
+---
+
+This is the document for New Donor LTV Predict model using Pledge and CS Center data.
+<br/><br/><br/>
+
+>### **Prepare the data with data preprocessing**
+
+#### Library Used
+
+```{r library, message=FALSE, warning=FALSE }
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidymodels)
+library(data.table)
+library(ranger)
+```
+
+
+#### Data Preprocessing for CS Center Data
+You can also get this file from Report Function in Charitable, (Report Number : OP32)   
+<br/>
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+call <- read_excel("call.xlsx") #Import data
+
+call_sel <- call %>% select(`Serial Number`, `Task Group` ,`Task Closed Date`) # Selected columns 
+
+call_sel <- 
+  call_sel %>%
+  group_by(`Serial Number`) %>% 
+  mutate(count = n()) %>% 
+  arrange(desc(`Task Closed Date`)) %>% 
+  distinct(`Serial Number`, .keep_all = TRUE) 
+#Removed duplicated record by serial No.
+
+call_tran <- 
+  call_sel %>% 
+  select(`Serial Number`, `Task Closed Date`, count) %>% 
+  mutate_if(is.character, as.factor)
+#Selected columns again and generated new column
+  
+call_tran$`Task Closed Date` <- as.numeric(call_tran$`Task Closed Date`)
+#Changed column format as numeric
+
+call_tran <- as.data.frame(call_tran)
+
+```
+
+Call data will be used to extract the number of calls and check the correlation with Pledge data.
+
+Prepare the data by using the latest records and creating a "count" column containing the total number of call records.   
+<br/>
+
+```{r, echo=FALSE}
+glimpse(call_tran)
+
+```
+
+#### Data Preprocessing for Pledge Data
+You can also get this file from Report Function in Charitable, (Report Number : OP24)   
+<br/>
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+new <- read_excel("new.xlsx") #Import data
+
+new_date <- 
+  new %>% 
+    filter(`Pledge Created` >= as.Date("2023-07-01") & `Pledge Created` <= as.Date("2024-01-31")) %>% 
+  filter(Frequency == 1) 
+#selected specific period and recurring pledge 
+
+new_sel <- 
+  new_date %>% 
+  select(SerialNo, DOB, Gender, SourceCode, Bank, TotalContribution, ChannelType, D0, `Pledge Created`, successful_transactions_count, Campaign)
+#Selected columns
+
+new_tran <- 
+  new_sel %>% 
+  mutate(total =TotalContribution) %>% 
+  dplyr::select(- TotalContribution) %>% 
+  mutate_if(is.character,as.factor)
+#Changed Y column name and changed column format
+
+new_tran$DOB <- as.numeric(new_tran$DOB)
+new_tran$D0 <- as.numeric(new_tran$D0)
+new_tran$`Pledge Created` <- as.numeric(new_tran$`Pledge Created`)
+#Changed column format as numeric
+
+```
+<br/>
+
+As you know, the pledge data contains lots of data including personal information which has to remove   
+<br/>
+Data preprocessing was performed by selecting the necessary columns and changing the characteristics of the columns.   
+<br/>
+For modeling purposes, a factor column containing many values must be converted to characters.   
+<br/>
+```{r,echo=TRUE, message=FALSE, warning=FALSE}
+
+new_tran <- 
+  new_tran %>% 
+  mutate(cam = ifelse(is.na(Campaign),0,1)) %>% 
+  dplyr::select(-Campaign)
+
+new_tran$cam <- as.factor(new_tran$cam)  
+new_tran$SerialNo <- as.character(new_tran$SerialNo)
+
+```
+<br/><br/>
+
+#### Changed column for merge data
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+setnames(call_tran, old = "Serial Number", new = "SerialNo")
+setnames(call_tran, old = "Task Closed Date", new = "task date")
+
+pled <- 
+  new_tran %>% 
+  left_join(call_tran, by = "SerialNo")
+#Merge data.
+```
+<br/>
+
+#### Check the merged data
+<br/>
+```{r, echo=FALSE}
+glimpse(pled)
+```
+
+Replaced "NA" value,
+if the column format is numeric then "Na" Value to "0".<br/>
+if the column format is character or factor then "Na" value is to "emt" . 
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+pled <- 
+  pled %>% 
+  mutate(task = ifelse(is.na(`task date`),0,`task date`)) %>% 
+  mutate(count = ifelse(is.na(count),0,count)) %>% 
+  select(-`task date`)
+
+pled <- 
+  pled %>% 
+  mutate(DOB = ifelse(is.na(DOB),0,DOB)) %>% 
+  mutate(D0 = ifelse(is.na(D0),0,D0)) %>% 
+  mutate(Gender = if_else(is.na(Gender),"emt",Gender)) %>% 
+  mutate(ChannelType = if_else(is.na(ChannelType),"emt",ChannelType)) %>% 
+  mutate_if(is.character,as.factor)
+
+pled$SerialNo <-as.character(pled$SerialNo) 
+#Serial No. is not used in the model.
+
+```
+
+```{r, echo=FALSE}
+skimr::skim(pled)
+```
+
+>### **Building a predictive model**
+
+<br/>
+
+#### Split data into “train” and “test”
+
+```{r, }
+set.seed(123) #Random number settings
+
+split <- initial_split(pled, prop = 0.7) #7:3
+train<- training(split)
+test <- testing(split)
+
+```
+<br/>
+
+#### Prepare the data for modeling
+
+Preprocessing for modeling, use "receipe" function in "tidymodels"
+
+```{r, echo=TRUE}
+rf_recipe_1 <- 
+  recipe(total ~ ., data = train) %>%
+  step_center(all_numeric_predictors()) %>%      #Centered from the mean
+  step_scale(all_numeric_predictors()) %>%       #Scaling by sd
+  step_rm(SerialNo) %>%                          #Excluding serial number
+  step_zv(all_numeric_predictors()) %>%          #Exclude variables with zero variance (variance is 0 and not predicted)
+  step_normalize(all_numeric_predictors())   #normalization
+
+```
+<br/>
+
+
+#### Generating Model with Random Forest
+<br/>
+```{r}
+mty <- rf_recipe_1 %>% 
+  prep() %>% 
+  bake(new_data = NULL)
+
+#mty value have to follow total independent value contains factor column as well
+
+```
+
+.
+<br/>
+
+```{r}
+rf_model <- 
+  rand_forest(mtry = 3) %>%
+  set_engine("ranger") %>%
+  set_mode("regression")
+```
+
+
+#### Fit the preprocessing model to "train" and "test" data
+<br/>
+
+```{r, echo=TRUE}
+pre_train <- rf_recipe_1 %>% prep() %>% bake(new_data = train)
+pre_test <- rf_recipe_1 %>% prep() %>% bake(new_data = test)
+
+```
+
+#### Fitting and Training the Model with prepared data 
+<br/>
+```{r, echo=TRUE}
+rf_fit <-   rf_model %>%   fit(total ~ ., data = pre_train)
+
+rf_pred <-   rf_fit %>%   predict(new_data = pre_test)
+
+```
+
+
+#### Evaluate models with real data.
+<br/>
+```{r}
+com_data <- data.frame(truth = pre_test$total, estimate = rf_pred$.pred)
+
+com_data_tbl <- as_tibble(com_data)
+
+r_squared <- 1 - sum((com_data_tbl$truth - com_data_tbl$estimate)^2) / sum((com_data_tbl$truth - mean(com_data_tbl$truth))^2)
+
+r_squared 
+```
+
+
+
