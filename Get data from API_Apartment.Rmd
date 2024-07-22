@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-#국토부 API 데이터로 아파트 가격 추적하기
+# 국토부 API 데이터로 아파트 가격 추적하기
 
 ###### 필요 패키지 불러오기
 ```{r library, message=FALSE, warning=FALSE, include=FALSE}
@@ -15,7 +15,7 @@ library(jsonlite)
 library(tidyverse)
 ```
 
-### 필요패키지 설명
+#### 필요패키지 설명
 httr 패키지 :  http 요청하기 위한 패키지 
 get과 post 방식이 있지만 API 추출을 위해서는 rest 방식이 사용되기 때문에
 get방식으로 요청 라인들을 요청하여 데이터를 수신한다
@@ -49,8 +49,6 @@ url : 데이터 요청 주소
 LAWD_CD (지역코드) :  5자리 숫자로 이루어짐
 DEAL_YMD (거래년월) : 6자리 년월로 표기 ex)202312 -> 23년 12월 거래 자료
 
-
-
 ```{r}
 url <- 'http://openapi.molit.go.kr:8081/OpenAPI_ToolInstallPackage/service/rest/RTMSOBJSvc/getRTMSDataSvcAptTrade'
 
@@ -70,6 +68,9 @@ I()에 집어넣느냐는 질문에는 이중코드 때문이다
 
 웹서버에 문자열을 그대로 보낼경우 %는 %25로 변경 되기 때문에
 우리는 % 문자 그대로 발송하기 위함이다
+
+본문에서는 용인시 수지구 (지역코드_41465)의 23년 12월 거래를요청하였다.
+
 
 이후 print 함수를 사용하여 받아온 데이터를 확인하면
 date, status, content- Type, size 의 값들이 표기가 된다.
