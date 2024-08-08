@@ -5,6 +5,8 @@ library(rvest)
 library(jsonlite)
 library(tidyverse)
 library(curl)
+library(openxlsx)
+
 
 
 # kamis 에서 최근 일자 도소매 가격 정보 불러오기
@@ -31,7 +33,7 @@ library(curl)
 #                        p_returntype = type),
 #           verbose())
 
-#실패 동일한 오류
+#실패 동일한 오류 -> 사이트가 크롤러를 막아서 생기는 이슈
 
 res <- GET(url,
            query = list(p_cert_key = mykey,
@@ -47,6 +49,8 @@ res <- GET(url,
            timeout(30)  # 타임아웃 설정
            verbose())
 #########################################  실패################
+
+#### GPT 방식의 불러오기 ##
 
 usethis::edit_r_environ()
 Sys.getenv("kamiskey")
@@ -78,8 +82,6 @@ handle_setopt(handle, timeout = 30)  # 타임아웃 설정
 response <- curl_fetch_memory(full_url, handle = handle)
 
 
-print(response)
-
 # 응답 확인
 if (response$status_code == 200) {
   content <- rawToChar(response$content)
@@ -102,6 +104,57 @@ print(parsed_content)
 df <- parsed_content$price
 
 str(df)
+
+##### 다른 불러오는 방법 추가(get 함수 사용, 헤더 추가)
+
+usethis::edit_r_environ()
+Sys.getenv("kamiskey")
+
+url <- 'http://www.kamis.co.kr/service/price/xml.do?action=dailySalesList'
+
+mykey <-  Sys.getenv("kamiskey") %>% I()
+
+id <- '4575'
+
+type <- "json"
+
+#헤더추가, 사이트가 크롤러를 막고 있기 때문
+
+headers = c(
+  'User-Agent' = 'Mozilla/5.0'
+)
+
+data = GET(full_url, add_headers(.headers=headers))
+
+data %>% 
+  content(as = "text", encoding = 'UTF-8') %>% 
+  fromJSON() -> json
+
+str(json)
+
+#################### 제일 먼저 배운 방식에  header 추가 방식 접목 ###
+
+res <- GET(url,
+           query = list(p_cert_key = mykey,
+                        p_cert_id = id,
+                        p_returntype = type),
+           add_headers(.headers = headers))
+
+
+print(res)
+
+#불러오기 성공
+
+res %>% 
+  content(as = "text", encoding = 'UTF-8') %>% 
+  fromJSON() -> json_1
+
+##데이터 프레임으로 변환
+
+str(json_1)
+
+
+df <- json_1$price
 
 #리스트는 dpr2, dpr3, dpr4, value, 그리고 direction
 
@@ -152,7 +205,7 @@ df$direction <- list_to_vector(df$direction)
 
 str(df)
 
-########### 리스트 컬럼 변경 완료
+########### 리스트 컬럼 변경 완료#######
 
 ### 속성값 변경
 
@@ -201,9 +254,11 @@ df %>%
 df %>% group_by(direction) %>% summarise(n = n())
 # 가격 상승 하락 별 숫자 보기
 
-df %>% select(productName, item_name)
 
-df %>% select(day1) %>% distinct()
-df %>% select(day2) %>% distinct()
-df %>% select(day3) %>% distinct()
-df %>% select(day4) %>% distinct()
+
+#####그래픽화 
+
+#엑셀 형식으로 파일 내보님
+
+write.xlsx(df, file = "df.xlsx")
+
